@@ -17,16 +17,14 @@ import cn.nukkit.event.inventory.InventoryOpenEvent;
 import cn.nukkit.event.inventory.InventoryPickupItemEvent;
 import cn.nukkit.event.inventory.InventoryTransactionEvent;
 import cn.nukkit.event.player.*;
-import cn.nukkit.event.redstone.RedstoneUpdateEvent;
 import cn.nukkit.level.Location;
 import cn.nukkit.level.Position;
 import cn.nukkit.plugin.PluginBase;
-import com.sun.jdi.Method;
+import com.csvreader.CsvWriter;
 import org.joda.time.DateTime;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.*;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.concurrent.*;
@@ -37,6 +35,7 @@ public class BehaviorLog extends PluginBase implements Listener {
     public final ExecutorService executor = Executors.newFixedThreadPool(3);
     public static final LinkedBlockingQueue<BehaviorLogItem> queue = new LinkedBlockingQueue<>();
     public static BehaviorLog behaviorLog;
+    public static String output_format = "log";
     public static boolean shutDown = true;
     @Override
     public void onEnable(){
@@ -45,54 +44,90 @@ public class BehaviorLog extends PluginBase implements Listener {
         if (!logFolder.exists()){
             logFolder.mkdirs();
         }
+        saveDefaultConfig();
+        if (getConfig().getString("output_format","log").equals("csv")){
+            output_format = getConfig().getString("output_format","log");
+        }
 
         executor.submit(() -> {
             logI("BehaviorLog thread started.");
             DateTime dateTime = new DateTime();
-            File file = new File(logFolderPath + File.separator + dateTime.toString("yyyy-MM-dd HH:mm:ss").replace(":","：") + ".log");
-            if (file.exists()){
-                logW("Log file is exists, please delete it or delete it before");
-                getServer().shutdown();
-                return;
-            }
-            try {
-                file.createNewFile();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            FileOutputStream ops = null;
-            BufferedOutputStream bops = null;
-            try {
-                ops = new FileOutputStream(file, true);
-                bops = new BufferedOutputStream(ops);
-                int save = 0;
-                while (shutDown){
-                    BehaviorLogItem behaviorLogItem = queue.take();
-                    if (behaviorLogItem != null){
-                        save ++;
-                        String writeString = behaviorLogItem + "\n";
-                        bops.write(writeString.getBytes(StandardCharsets.UTF_8));
-                        bops.flush();
-                    }
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }finally {
-                if (ops != null){
-                    try {
-                        ops.close();
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                }
-                if (bops != null){
-                    try {
-                        bops.close();
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                }
-            }
+            File file = null;
+           if (output_format.equals("csv")){
+               file = new File(logFolderPath + File.separator + dateTime.toString("yyyy-MM-dd HH:mm:ss").replace(":","：") + ".csv");
+               if (file.exists()){
+                   logW("Log file is exists, please delete it or delete it before");
+                   getServer().shutdown();
+                   return;
+               }
+               try {
+                   file.createNewFile();
+               } catch (IOException e) {
+                   throw new RuntimeException(e);
+               }
+               FileOutputStream ops;
+               CsvWriter csvWriter = null;
+               try {
+                   ops = new FileOutputStream(file, true);
+                   csvWriter =new CsvWriter(ops, ',', Charset.forName("GBK"));
+                   String[] headers = new String[]{"time","object","position","behavior"};
+                   csvWriter.writeRecord(headers);
+                   while (shutDown){
+                       BehaviorLogItem behaviorLogItem = queue.take();
+                       csvWriter.writeRecord(new String[]{behaviorLogItem.getTime(),behaviorLogItem.getPlayer(),behaviorLogItem.getPosition(),behaviorLogItem.getBehavior()});
+                       csvWriter.flush();
+                   }
+
+               } catch (Exception e) {
+                   throw new RuntimeException(e);
+               }finally {
+                   if (csvWriter != null){
+                       csvWriter.close();
+                   }
+               }
+
+           }else {
+              file = new File(logFolderPath + File.separator + dateTime.toString("yyyy-MM-dd HH:mm:ss").replace(":","：") + ".log");
+               if (file.exists()){
+                   logW("Log file is exists, please delete it or delete it before");
+                   getServer().shutdown();
+                   return;
+               }
+               try {
+                   file.createNewFile();
+               } catch (IOException e) {
+                   throw new RuntimeException(e);
+               }
+               FileOutputStream ops = null;
+               BufferedOutputStream bops = null;
+               try {
+                   ops = new FileOutputStream(file, true);
+                   bops = new BufferedOutputStream(ops);
+                   while (shutDown) {
+                       BehaviorLogItem behaviorLogItem = queue.take();
+                       String writeString = behaviorLogItem + "\n";
+                       bops.write(writeString.getBytes(StandardCharsets.UTF_8));
+                       bops.flush();
+                   }
+               } catch (Exception e) {
+                   throw new RuntimeException(e);
+               } finally {
+                   if (ops != null) {
+                       try {
+                           ops.close();
+                       } catch (IOException e) {
+                           throw new RuntimeException(e);
+                       }
+                   }
+                   if (bops != null) {
+                       try {
+                           bops.close();
+                       } catch (IOException e) {
+                           throw new RuntimeException(e);
+                       }
+                   }
+               }
+           }
         });
         getServer().getPluginManager().registerEvents(this,this);
         logI("BehaviorLog plugin was loaded.");
@@ -346,7 +381,7 @@ public class BehaviorLog extends PluginBase implements Listener {
     public String posToString(Position position){
         if (position != null){
             if (position.level != null){
-                return Math.floor(position.x) + "," + Math.floor(position.y) + "," + Math.floor(position.z) + " " + position.level.getName();
+                return Math.floor(position.x) + "," + Math.floor(position.y) + "," + Math.floor(position.z) + "," + position.level.getName();
             }
             return Math.floor(position.x) + "," + Math.floor(position.y) + "," + Math.floor(position.z);
         }
